@@ -1,0 +1,16 @@
+HKCR
+{
+	NoRemove CLSID
+	{
+		ForceRemove {53220626-63B8-443C-975C-1961FD679EF9} = s 'TransPluginImpl Class'
+		{
+			ForceRemove Programmable
+			InprocServer32 = s '%MODULE%'
+			{
+				val ThreadingModel = s 'Apartment'
+			}
+			TypeLib = s '{79560850-500A-4942-A779-BCB2E5B3D93C}'
+			Version = s '1.0'
+		}
+	}
+}

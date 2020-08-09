@@ -1,0 +1,34 @@
+// TransPlugin.idl : TransPlugin 的 IDL 源
+//
+
+// 此文件将由 MIDL 工具处理以
+// 产生类型库(TransPlugin.tlb)和封送处理代码。
+
+import "oaidl.idl";
+import "ocidl.idl";
+
+[
+	object,
+	uuid(FF87F646-27FD-41EF-BC61-D19595E27BF0),
+	dual,
+	nonextensible,
+	pointer_default(unique)
+]
+interface ITransPluginImpl : IDispatch{
+};
+[
+	uuid(79560850-500A-4942-A779-BCB2E5B3D93C),
+	version(1.0),
+]
+library TransPluginLib
+{
+	importlib("stdole2.tlb");
+	[
+		uuid(53220626-63B8-443C-975C-1961FD679EF9)		
+	]
+	coclass TransPluginImpl
+	{
+		[default] interface ITransPluginImpl;
+	};
+};
+
