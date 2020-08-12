@@ -1,9 +1,10 @@
 #pragma once
 #include "afxcmn.h"
 #include "afxwin.h"
-
+#include <vector>
 
 // TransForm 对话框
+using namespace std;
 
 class TransForm : public CDialogEx
 {
@@ -13,7 +14,9 @@ public:
 	TransForm(CWnd* pParent = NULL);   // 标准构造函数
 	virtual ~TransForm();
 
+	void InitApp(IApp * DeweApp);
 	afx_msg HBRUSH OnCtlColor(CDC* pDC, CWnd* pWnd, UINT nCtlColor);
+	afx_msg void OnTimer(UINT_PTR nIDEvent);
 	void AddListData(CString strChannelName,
 						CString strSampleRate,
 						CString strMeasDual,
@@ -24,6 +27,11 @@ public:
 
 // 对话框数据
 	enum { IDD = IDD_TRANSFORM };
+
+private:
+	vector<IChannel*> getAllChannels();
+	void UpdateList();
+	int GetSelectedChannels();
 
 protected:
 	HICON m_hIcon;
@@ -37,4 +45,8 @@ public:
 	CListCtrl m_list;
 	CComboBox m_combox;
 	CEdit m_edit;
+	IApp *m_app;
+	vector<IChannel*> m_channelVec;
+	long m_sampleRate;
+	long m_calcDelay;
 };
