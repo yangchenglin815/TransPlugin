@@ -31,7 +31,11 @@ public:
 private:
 	vector<IChannel*> getAllChannels();
 	void UpdateList();
+	void UpdateValue();
 	int GetSelectedChannels();
+	void OnGetData(IChannel *channel, double *value);
+	void AppendText(CString strAdd);
+	void SendChannelData(unsigned int nParamNum, const char* data, size_t len);
 
 protected:
 	HICON m_hIcon;
@@ -48,5 +52,5 @@ public:
 	IApp *m_app;
 	vector<IChannel*> m_channelVec;
 	long m_sampleRate;
-	long m_calcDelay;
+	CButton m_checkBox;
 };

@@ -24,8 +24,9 @@ STDMETHODIMP CTransPluginImpl::put_Used(VARIANT_BOOL Value)
 STDMETHODIMP CTransPluginImpl::Configure()
 {
 	AFX_MANAGE_STATE(AfxGetStaticModuleState());
-	TransForm dlg;
-	dlg.DoModal();
+	TransForm *transFormDlg = new TransForm;
+	transFormDlg->InitApp(app);
+
 	return S_OK;
 }
 
