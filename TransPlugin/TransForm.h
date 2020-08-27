@@ -2,9 +2,27 @@
 #include "afxcmn.h"
 #include "afxwin.h"
 #include <vector>
+#include <map>
 
 // TransForm ¶Ô»°¿ò
 using namespace std;
+
+#define API_DATA_LEN     (8)
+
+typedef struct api_udp_data
+{
+	unsigned char szChannelNo[API_DATA_LEN];
+	float fValue;
+
+	api_udp_data() {
+		memset(&szChannelNo, 0, API_DATA_LEN);
+		fValue = 0.000;
+	}
+
+	int get_size() {
+		return sizeof(api_udp_data);
+	}
+}api_udp_data_t;
 
 class TransForm : public CDialogEx
 {
@@ -33,9 +51,10 @@ private:
 	void UpdateList();
 	void UpdateValue();
 	int GetSelectedChannels();
-	void OnGetData(IChannel *channel, double *value);
+	void OnGetData(IChannel *channel, float *value);
 	void AppendText(CString strAdd);
-	void SendChannelData(unsigned int nParamNum, const char* data, size_t len);
+	void SendChannelData(const char* data, size_t len);
+	void UdpSendData(int paramNum);
 
 protected:
 	HICON m_hIcon;
@@ -51,6 +70,7 @@ public:
 	CEdit m_edit;
 	IApp *m_app;
 	vector<IChannel*> m_channelVec;
+	map<int, api_udp_data_t> m_apiDataMap;
 	long m_sampleRate;
 	CButton m_checkBox;
 };

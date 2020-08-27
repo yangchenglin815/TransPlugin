@@ -108,7 +108,6 @@ BOOL TransForm::OnInitDialog()
 	m_combox.InsertString(0, L"飞控测试系统");
 	m_combox.InsertString(1, L"液压测试系统");
 	m_combox.InsertString(2, L"起落架测试系统");
-	m_combox.SetCurSel(0);
 
 	//初始化网络模块
 	char hostname[254]={0};
@@ -149,7 +148,7 @@ void TransForm::UpdateList()
 		BSTR des;
 		double max = 0.0;
 		double min = 0.0;
-		double value = 0.0;
+		float value = 0.0;
 		(*iter)->get_ChNo(&chNo);
 		(*iter)->get_Unit_(&unit);
 		(*iter)->get_Description(&des);
@@ -162,7 +161,7 @@ void TransForm::UpdateList()
 		CString absMax;
 		CString absMin;
 		sampleRate.Format(_T("%ld"), m_sampleRate);
-		sValue.Format(_T("%lf"), value);
+		sValue.Format(_T("%f"), value);
 		absMax.Format(_T("%lf"), max);
 		absMin.Format(_T("%lf"), min);
 		AddListData(chNo, sampleRate, sValue, des, unit, absMin, absMax);
@@ -178,7 +177,7 @@ void TransForm::UpdateValue()
 	{
 		double max = 0.0;
 		double min = 0.0;
-		double value = 0.0;
+		float value = 0.0;
 		(*iter)->get_AbsMax(&max);
 		(*iter)->get_AbsMin(&min);
 		OnGetData(*iter, &value);
@@ -188,7 +187,7 @@ void TransForm::UpdateValue()
 		CString absMax;
 		CString absMin;
 		sampleRate.Format(_T("%ld"), m_sampleRate);
-		sValue.Format(_T("%lf"), value);
+		sValue.Format(_T("%f"), value);
 		absMax.Format(_T("%lf"), max);
 		absMin.Format(_T("%lf"), min);
 
@@ -202,11 +201,20 @@ void TransForm::UpdateValue()
 int TransForm::GetSelectedChannels()
 {
 	int selCount = 0;
+	m_apiDataMap.clear();
 	int icount = m_list.GetItemCount();
 	for (int i = 0; i < icount; i++)
 	{
 		if (m_list.GetCheck(i))
 		{
+			CString chNo  = m_list.GetItemText(i, 0);
+			CString value = m_list.GetItemText(i, 2);
+
+			api_udp_data_t api_data;
+			memcpy(api_data.szChannelNo, chNo, API_DATA_LEN);
+			api_data.fValue = (float)_tstof(value);
+			m_apiDataMap.insert(std::pair<int, api_udp_data_t>(selCount, api_data));
+
 			selCount++;
 		}
 	}
@@ -214,7 +222,7 @@ int TransForm::GetSelectedChannels()
 }
 
 
-void TransForm::OnGetData(IChannel *channel, double *value)
+void TransForm::OnGetData(IChannel *channel, float *value)
 {
 	if (!channel) 
 		return;
@@ -228,7 +236,7 @@ void TransForm::OnGetData(IChannel *channel, double *value)
 		long bufSize = 0;
 		channel->get_DBBufSize(&bufSize);
 		long index = (pos - 1 + bufSize) % bufSize;
-		channel->get_DBValuesDouble(index, value);
+		channel->get_DBValues(index, value);
 	}
 }
 
@@ -240,17 +248,45 @@ void TransForm::AppendText(CString strAdd)
 }
 
 
-void TransForm::SendChannelData(unsigned int nParamNum, const char* data, size_t len)
+void TransForm::SendChannelData(const char* data, size_t len)
 {
 	int devID = getDevID(m_combox.GetCurSel());
 	char *pDataBuff = new char[len + 2];
 	ZeroMemory(pDataBuff, len + 2);
 	pDataBuff[0] = (char)(0xAA);
-	sprintf_s(pDataBuff + 1, len + 2, "%x", nParamNum);
+	pDataBuff[1] = devID & 0xFF;
+
 	memcpy(pDataBuff + 2, data, len);
 
 	NetUdpClientSend(pDataBuff, len + 2);
 	delete[] pDataBuff;
+}
+
+
+void TransForm::UdpSendData(int paramNum)
+{
+	size_t length = paramNum * 9 + 1;
+	char *buffer = new char[length];
+	ZeroMemory(buffer, length);
+	buffer[0] = paramNum & 0xFF;
+
+	int index = 1;
+	for (int num = 0; num < paramNum; num++, index++)
+	{
+		buffer[num * 9 + 1] = 5 & 0xFF;
+		float value = m_apiDataMap[num].fValue;
+		unsigned char *hex = (unsigned char *)&value;
+		for (int i = 0; i < 4; i++) {
+			buffer[9 * index - 4 - i] = hex[i];
+		}
+
+		for (int j = 9 * index - 3; j < 9 * index + 1; ++j) {
+			buffer[j] = (char)0xFF;
+		}
+	}
+
+	SendChannelData(buffer, length);
+	delete[] buffer;
 }
 
 void TransForm::OnTimer(UINT_PTR nIDEvent)
@@ -261,40 +297,17 @@ void TransForm::OnTimer(UINT_PTR nIDEvent)
 	case 1000:
 		{
 		    UpdateValue();
-			int selChannelCount = GetSelectedChannels();
-			DWORD sec = 0;
-			ULONGLONG nowTime = GetTickCount64();
-			ULONGLONG timeElapsed = nowTime - st_beginTime;
-			sec = static_cast<DWORD>(timeElapsed / 1000);//显示每秒每次的总数
-			WCHAR wstrTimeElapsed[100] = { 0 };
-			if (selChannelCount == 0)
-			{
-				sec = 0;
-			}
-			swprintf_s(wstrTimeElapsed, sizeof(wstrTimeElapsed) / 2, L"选择通道:%d\n采样次数:%d", selChannelCount, sec);
-			AppendText(wstrTimeElapsed);
-			int index = m_combox.GetCurSel();
-			CString devID;
-			devID.Format(_T("%d"), index);
-			CString msg = L"选择设备：" + devID;
-			AppendText(msg);
 
+			int index = m_combox.GetCurSel();
 			int num = GetSelectedChannels();
 			CString cNum;
+			CString msg;
 			cNum.Format(_T("%d"), num);
 			msg = L"选择通道：" + cNum;
 			AppendText(msg);
 
-			unsigned int paramNum = 1;
-			size_t length = paramNum * 9;
-			char *buffer = new char[length];
-			ZeroMemory(buffer, length);
-		    sprintf_s(buffer, length, "%x", 6);
-			double value = 2.234;
-			sprintf_s(buffer + 1, length, "%x", value);
-
-			SendChannelData(paramNum, buffer, length);
-			delete[] buffer;
+			if (index != -1)
+			   UdpSendData(num);
 		}
 		break;
 	default:break;
