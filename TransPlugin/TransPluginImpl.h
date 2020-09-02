@@ -55,9 +55,8 @@ public:
 
 private:
 	IApp *app;
-	bool used;
+	VARIANT_BOOL used;
 	IChannel* ch; 
-
 	void MountChannels();
 
 	// IPlugin2 Methods

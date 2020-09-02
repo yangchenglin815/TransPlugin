@@ -7,7 +7,7 @@
 // TransForm ¶Ô»°¿ò
 using namespace std;
 
-#define API_DATA_LEN     (8)
+#define API_DATA_LEN     (6)
 
 typedef struct api_udp_data
 {
@@ -55,6 +55,7 @@ private:
 	void AppendText(CString strAdd);
 	void SendChannelData(const char* data, size_t len);
 	void UdpSendData(int paramNum);
+	void UdpSendLongData(int paramNum);
 
 protected:
 	HICON m_hIcon;
@@ -65,6 +66,7 @@ protected:
 public:
 	afx_msg void OnEnChangeEdit1();
 	afx_msg void OnBnClickedCheck1();
+	afx_msg void OnSysCommand(UINT nID, LPARAM lParam);
 	CListCtrl m_list;
 	CComboBox m_combox;
 	CEdit m_edit;
@@ -73,4 +75,12 @@ public:
 	map<int, api_udp_data_t> m_apiDataMap;
 	long m_sampleRate;
 	CButton m_checkBox;
+	afx_msg void OnEnChangeEdit2();
+	CButton m_setBtn;
+	CEdit m_timeEdit;
+	afx_msg void OnBnClickedButton1();
+	int m_nInterval;
+	afx_msg void OnBnClickedRadio1();
+	CEdit m_rateEdit;
+	int m_nRateInterval;
 };

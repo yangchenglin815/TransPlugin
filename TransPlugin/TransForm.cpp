@@ -5,9 +5,10 @@
 #include "TransForm.h"
 #include "afxdialogex.h"
 #include "netudp.h"
+#include <atlconv.h>
+#include "logging.h"
 
 // TransForm 对话框
-static ULONGLONG st_beginTime = 0;
 IMPLEMENT_DYNAMIC(TransForm, CDialogEx)
 
 static int getDevID(int index)
@@ -33,13 +34,47 @@ static int getDevID(int index)
 
 TransForm::TransForm(CWnd* pParent /*=NULL*/)
 	: CDialogEx(TransForm::IDD, pParent)
+	, m_nInterval(1000)
+	, m_nRateInterval(1000)
 {
 	m_hIcon = AfxGetApp()->LoadIcon(IDR_MAINFRAME);
+
+	TCHAR *path = new TCHAR[100];
+	ZeroMemory(path, 100);
+	GetCurrentDirectory(100, path);
+
+	CString filename;
+	filename.Format(L"%s", path);
+	
+	SYSTEMTIME time;
+	GetLocalTime(&time);
+	char dateTimeStr[200] = { 0 };
+	sprintf(dateTimeStr, "%d%02d%02d%02d%02d%02d", time.wYear, time.wMonth, time.wDay, time.wHour, time.wMinute, time.wSecond);
+	
+	int charLen = strlen(dateTimeStr);
+    int len = MultiByteToWideChar(CP_ACP, 0, dateTimeStr, charLen, NULL, 0);
+	TCHAR *buf = new TCHAR[len + 1];
+    MultiByteToWideChar(CP_ACP, 0, dateTimeStr, charLen, buf, len);
+	buf[len] = '\0';
+	CString pathName;
+	pathName.Append(buf);
+	delete[]buf;
+	filename = filename + _T("\\Log_") + pathName + _T(".log");
+
+	CFile file(filename, CFile::modeCreate);
+	file.Close();
+
+	std::wstring ws(filename);
+	std::string strPath;
+	strPath.assign(ws.begin(), ws.end());
+	Log::Initialise(strPath);
+	Log::SetThreshold(Log::LOG_TYPE_DEBUG);
+	Log::Info("MainThread Run.");
 }
 
 TransForm::~TransForm()
 {
-	int a = -1;
+	
 }
 
 void TransForm::InitApp(IApp * DeweApp)
@@ -66,8 +101,11 @@ vector<IChannel*> TransForm::getAllChannels()
 	{
 		IChannel *channel;
 		channels->get_Item(i, &channel);
+		VARIANT_BOOL async;
+		channel->get_Async(&async);
 
-		allChannels.push_back(channel);
+		if (!async)
+			allChannels.push_back(channel);
 	}
 
 	return allChannels;
@@ -109,6 +147,10 @@ BOOL TransForm::OnInitDialog()
 	m_combox.InsertString(1, L"液压测试系统");
 	m_combox.InsertString(2, L"起落架测试系统");
 
+	m_timeEdit.SetWindowText(TEXT("1000"));
+	m_rateEdit.SetWindowText(TEXT("1000"));
+	((CButton*)GetDlgItem(IDC_RADIO1))->SetCheck(BST_CHECKED);
+
 	//初始化网络模块
 	char hostname[254]={0};
 	gethostname(hostname,sizeof(hostname));
@@ -123,6 +165,7 @@ BOOL TransForm::OnInitDialog()
 	if(!NetUdpClientInit(strIP, 8010))
 	{
 		MessageBox(L"NetUdpClientInit Failed!", L"网络模块初始化失败", MB_OK);
+		Log::Info("网络模块初始化失败");
 		assert(0);
 		return 0;
 	}
@@ -130,8 +173,9 @@ BOOL TransForm::OnInitDialog()
 	m_channelVec = getAllChannels();
 	UpdateList();
 
-	SetTimer(1000, 1000, NULL);
-	st_beginTime = GetTickCount64();
+	SetTimer(1, m_nRateInterval, NULL);
+	SetTimer(2, m_nInterval, NULL);
+	Log::Info("MainThread Init Finished.");
 
 	return TRUE;
 }
@@ -209,9 +253,13 @@ int TransForm::GetSelectedChannels()
 		{
 			CString chNo  = m_list.GetItemText(i, 0);
 			CString value = m_list.GetItemText(i, 2);
-
+			
 			api_udp_data_t api_data;
-			memcpy(api_data.szChannelNo, chNo, API_DATA_LEN);
+			int length = chNo.GetLength();
+			for (int j = 0; j < length; ++j)
+			{
+				api_data.szChannelNo[j] = chNo[j];
+			}
 			api_data.fValue = (float)_tstof(value);
 			m_apiDataMap.insert(std::pair<int, api_udp_data_t>(selCount, api_data));
 
@@ -259,12 +307,18 @@ void TransForm::SendChannelData(const char* data, size_t len)
 	memcpy(pDataBuff + 2, data, len);
 
 	NetUdpClientSend(pDataBuff, len + 2);
+
+	for (int i = 0; i < len + 2; ++i)
+	{
+		Log::Info("Udp Send: %X", pDataBuff[i]);
+	}
 	delete[] pDataBuff;
 }
 
 
 void TransForm::UdpSendData(int paramNum)
 {
+	Log::Info("The params num: %d.", paramNum);
 	size_t length = paramNum * 9 + 1;
 	char *buffer = new char[length];
 	ZeroMemory(buffer, length);
@@ -275,6 +329,7 @@ void TransForm::UdpSendData(int paramNum)
 	{
 		buffer[num * 9 + 1] = 5 & 0xFF;
 		float value = m_apiDataMap[num].fValue;
+		Log::Info("Params index: %d, Value: %f", index, value);
 		unsigned char *hex = (unsigned char *)&value;
 		for (int i = 0; i < 4; i++) {
 			buffer[9 * index - 4 - i] = hex[i];
@@ -289,26 +344,77 @@ void TransForm::UdpSendData(int paramNum)
 	delete[] buffer;
 }
 
+
+void TransForm::UdpSendLongData(int paramNum)
+{
+	Log::Info("The params num: %d.", paramNum);
+	size_t length = paramNum * (9 + API_DATA_LEN) + 1;
+	char *buffer = new char[length];
+	ZeroMemory(buffer, length);
+	buffer[0] = paramNum & 0xFF;
+
+	int index = 1;
+	for (int num = 0; num < paramNum; num++, index++)
+	{
+		int offset = num * (9 + API_DATA_LEN) + 1;
+		memcpy(&buffer[offset], m_apiDataMap[num].szChannelNo, API_DATA_LEN);
+
+		buffer[offset + API_DATA_LEN] = 5 & 0xFF;
+		float value = m_apiDataMap[num].fValue;
+		Log::Info("Params index: %d, ChNo: %s, Value: %f", index, m_apiDataMap[num].szChannelNo, value);
+		unsigned char *hex = (unsigned char *)&value;
+		for (int i = 0; i < 4; i++) {
+			offset = (9 + API_DATA_LEN) * index - 4 - i;
+			buffer[offset] = hex[i];
+		}
+
+		offset = (9 + API_DATA_LEN) * index;
+		for (int j = offset - 3; j < offset + 1; ++j) {
+			buffer[j] = (char)0xFF;
+		}
+	}
+
+	SendChannelData(buffer, length);
+	delete[] buffer;
+}
+
 void TransForm::OnTimer(UINT_PTR nIDEvent)
 {
 	// TODO: 在此添加消息处理程序代码和/或调用默认值
 	switch(nIDEvent)
 	{
-	case 1000:
+	case 1:
 		{
-		    UpdateValue();
-
+		    //m_channelVec.clear();
+		    //m_channelVec = getAllChannels();
+			UpdateValue();
+		}
+		break;
+	case 2:
+	    {
 			int index = m_combox.GetCurSel();
 			int num = GetSelectedChannels();
+			Log::Info("Select channel total: %d.", num);
 			CString cNum;
 			CString msg;
-			cNum.Format(_T("%d"), num);
-			msg = L"选择通道：" + cNum;
+			cNum.Format(_T("%d"), m_nInterval);
+			msg = L"数据发送周期：" + cNum;
 			AppendText(msg);
 
-			if (index != -1)
-			   UdpSendData(num);
-		}
+			if (index != -1) 
+			{
+				if (((CButton*)GetDlgItem(IDC_RADIO1))->GetCheck())
+				{
+					Log::Info("Exe mode 1.");
+					UdpSendData(num);
+				}
+				else if (((CButton*)GetDlgItem(IDC_RADIO2))->GetCheck())
+				{
+					Log::Info("Exe mode 2.");
+					UdpSendLongData(num);
+				}
+			}
+	     }
 		break;
 	default:break;
 	}
@@ -355,6 +461,9 @@ void TransForm::DoDataExchange(CDataExchange* pDX)
 	DDX_Control(pDX, IDC_COMBO1, m_combox);
 	DDX_Control(pDX, IDC_EDIT1, m_edit);
 	DDX_Control(pDX, IDC_CHECK1, m_checkBox);
+	DDX_Control(pDX, IDC_BUTTON1, m_setBtn);
+	DDX_Control(pDX, IDC_EDIT2, m_timeEdit);
+	DDX_Control(pDX, IDC_EDIT3, m_rateEdit);
 }
 
 
@@ -363,6 +472,10 @@ BEGIN_MESSAGE_MAP(TransForm, CDialogEx)
 	ON_BN_CLICKED(IDC_CHECK1, &TransForm::OnBnClickedCheck1)
 	ON_WM_TIMER()
 	ON_WM_CTLCOLOR()
+	ON_EN_CHANGE(IDC_EDIT2, &TransForm::OnEnChangeEdit2)
+	ON_BN_CLICKED(IDC_BUTTON1, &TransForm::OnBnClickedButton1)
+	ON_WM_SYSCOMMAND()
+	ON_BN_CLICKED(IDC_RADIO1, &TransForm::OnBnClickedRadio1)
 END_MESSAGE_MAP()
 
 
@@ -383,10 +496,74 @@ void TransForm::OnEnChangeEdit1()
 void TransForm::OnBnClickedCheck1()
 {
 	// TODO: 在此添加控件通知处理程序代码
+	Log::Info("All in Clicked.");
 	int checkState = m_checkBox.GetCheck();
 	int icount = m_list.GetItemCount();
 	for (int i = 0; i < icount; i++)
 	{
 		m_list.SetCheck(i, checkState);
 	}
+}
+
+
+void TransForm::OnSysCommand(UINT nID, LPARAM lParam)
+{
+	if ((nID & 0xFFFFFF) == SC_CLOSE)
+	{
+		KillTimer(1);
+		KillTimer(2);
+
+		m_apiDataMap.clear();
+		m_channelVec.clear();
+		Log::Info("MainThread exit.");
+
+		this->DestroyWindow();
+	}
+	CDialogEx::OnSysCommand(nID, lParam);
+}
+
+void TransForm::OnEnChangeEdit2()
+{
+	// TODO:  如果该控件是 RICHEDIT 控件，它将不
+	// 发送此通知，除非重写 CDialogEx::OnInitDialog()
+	// 函数并调用 CRichEditCtrl().SetEventMask()，
+	// 同时将 ENM_CHANGE 标志“或”运算到掩码中。
+
+	// TODO:  在此添加控件通知处理程序代码
+}
+
+
+void TransForm::OnBnClickedButton1()
+{
+	// TODO:  在此添加控件通知处理程序代码
+	KillTimer(1);
+	KillTimer(2);
+
+	CString rateInterval;
+	m_rateEdit.GetWindowText(rateInterval);
+	CString timeInterval;
+	m_timeEdit.GetWindowText(timeInterval);
+
+	if (rateInterval.IsEmpty() || rateInterval == "0")
+	{
+		rateInterval = "1000";
+		m_rateEdit.SetWindowTextW(rateInterval);
+	}
+	if (timeInterval.IsEmpty() || timeInterval == "0")
+	{
+		timeInterval = "1000";
+		m_timeEdit.SetWindowTextW(timeInterval);
+	}
+
+	m_nRateInterval = _ttoi(rateInterval);
+	SetTimer(1, m_nRateInterval, NULL);
+	m_nInterval = _ttoi(timeInterval);
+	SetTimer(2, m_nInterval, NULL);
+	Log::Info("Set updateRate:%d, sendRate:%d.", m_nRateInterval, m_nInterval);
+}
+
+
+void TransForm::OnBnClickedRadio1()
+{
+	// TODO: 在此添加控件通知处理程序代码
 }
