@@ -83,4 +83,5 @@ public:
 	afx_msg void OnBnClickedRadio1();
 	CEdit m_rateEdit;
 	int m_nRateInterval;
+	CString m_fileDir;
 };

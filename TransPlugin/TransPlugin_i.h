@@ -4,7 +4,7 @@
 
 
  /* File created by MIDL compiler version 7.00.0555 */
-/* at Wed Sep 02 20:48:48 2020
+/* at Sun Sep 13 19:26:48 2020
  */
 /* Compiler settings for TransPlugin.idl:
     Oicf, W1, Zp8, env=Win32 (32b run), target_arch=X86 7.00.0555 

@@ -32,6 +32,41 @@ static int getDevID(int index)
 	return devID;
 }
 
+static LPCWSTR stringToLPCWSTR(std::string orig)
+{
+	size_t origsize = orig.length() + 1;
+	const size_t newsize = 100;
+	size_t convertedChars = 0;
+	wchar_t *wcstring = (wchar_t *)malloc(sizeof(wchar_t)*(orig.length() - 1));
+	mbstowcs_s(&convertedChars, wcstring, origsize, orig.c_str(), _TRUNCATE);
+
+    return wcstring;
+}
+
+
+static int SplitString(const CString str, char split, CStringArray &strArray)
+{
+	strArray.RemoveAll();
+	CString strTemp = str;
+	int iIndex = 0;
+	while (1)
+	{
+		iIndex = strTemp.Find(split);
+		if (iIndex >= 0)
+		{
+			strArray.Add(strTemp.Left(iIndex));
+			strTemp = strTemp.Right(strTemp.GetLength() - iIndex - 1);
+		}
+		else
+		{
+			break;
+		}
+	}
+	strArray.Add(strTemp);
+
+	return strArray.GetSize();
+}
+
 TransForm::TransForm(CWnd* pParent /*=NULL*/)
 	: CDialogEx(TransForm::IDD, pParent)
 	, m_nInterval(1000)
@@ -70,6 +105,29 @@ TransForm::TransForm(CWnd* pParent /*=NULL*/)
 	Log::Initialise(strPath);
 	Log::SetThreshold(Log::LOG_TYPE_DEBUG);
 	Log::Info("MainThread Run.");
+
+	//获取App路径
+	char modulePath[MAX_PATH] = { 0 };
+	GetModuleFileNameA(NULL, modulePath, MAX_PATH);
+
+	string appDir = modulePath;
+	int pos = appDir.rfind('\\');
+	appDir = appDir.substr(0, pos + 1) + "config.ini";
+	m_fileDir = stringToLPCWSTR(appDir);
+
+	if (!PathFileExists(m_fileDir))
+	{
+		CFile iniFile;
+		if (iniFile.Open(stringToLPCWSTR(appDir), CFile::modeCreate | CFile::modeReadWrite))
+		{
+			iniFile.Close();
+			WritePrivateProfileString(L"App", L"devIndex", L"-1", m_fileDir);
+			WritePrivateProfileString(L"App", L"updateRate", L"1000", m_fileDir);
+			WritePrivateProfileString(L"App", L"sendRate", L"1000", m_fileDir);
+			WritePrivateProfileString(L"App", L"channel", L"", m_fileDir);
+			WritePrivateProfileString(L"App", L"mode", L"1", m_fileDir);
+		}
+	}
 }
 
 TransForm::~TransForm()
@@ -147,9 +205,26 @@ BOOL TransForm::OnInitDialog()
 	m_combox.InsertString(1, L"液压测试系统");
 	m_combox.InsertString(2, L"起落架测试系统");
 
-	m_timeEdit.SetWindowText(TEXT("1000"));
-	m_rateEdit.SetWindowText(TEXT("1000"));
-	((CButton*)GetDlgItem(IDC_RADIO1))->SetCheck(BST_CHECKED);
+	int devIndex = GetPrivateProfileInt(L"App", L"devIndex", -1, m_fileDir);
+	m_combox.SetCurSel(devIndex);
+
+	CString sendTime;
+	GetPrivateProfileString(L"App", L"sendRate", L"1000", sendTime.GetBuffer(MAX_PATH), MAX_PATH, m_fileDir);
+	m_timeEdit.SetWindowText(sendTime);
+	CString updateTime;
+	GetPrivateProfileString(L"App", L"updateRate", L"1000", updateTime.GetBuffer(MAX_PATH), MAX_PATH, m_fileDir);
+	m_rateEdit.SetWindowText(updateTime);
+
+
+	int mode = GetPrivateProfileInt(L"App", L"mode", 1, m_fileDir);
+	if (mode == 1)
+	{
+		((CButton*)GetDlgItem(IDC_RADIO1))->SetCheck(BST_CHECKED);
+	}
+	else
+	{
+		((CButton*)GetDlgItem(IDC_RADIO2))->SetCheck(BST_CHECKED);
+	}
 
 	//初始化网络模块
 	char hostname[254]={0};
@@ -159,10 +234,10 @@ BOOL TransForm::OnInitDialog()
 	hostent *phostent = gethostbyname(hostname);
 	in_addr addr;
 	memcpy(&addr.S_un.S_addr,phostent->h_addr_list[0],phostent->h_length);
-	addr.S_un.S_un_b.s_b4 = 255;
+	//addr.S_un.S_un_b.s_b4 = 255;
 	char *strIP = inet_ntoa(addr);
 
-	if(!NetUdpClientInit(strIP, 8010))
+	if (!NetUdpClientInit(strIP, 8010))
 	{
 		MessageBox(L"NetUdpClientInit Failed!", L"网络模块初始化失败", MB_OK);
 		Log::Info("网络模块初始化失败");
@@ -172,6 +247,27 @@ BOOL TransForm::OnInitDialog()
 
 	m_channelVec = getAllChannels();
 	UpdateList();
+
+	CString channelIni = L"";
+	GetPrivateProfileString(L"App", L"channel", L"", channelIni.GetBuffer(MAX_PATH), MAX_PATH, m_fileDir);
+	CStringArray array;
+	int index = channelIni.Find(L';');
+	SplitString(channelIni, L';', array);
+	int size = array.GetSize();
+	for (int i = 0; i < size; ++i)
+	{
+		int icount = m_list.GetItemCount();
+		CString temp = array.GetAt(i);
+		for (int j = 0; j < icount; j++)
+		{
+			CString chNo = m_list.GetItemText(j, 0);
+			if (chNo == temp)
+			{
+				m_list.SetCheck(j);
+				break;
+			}
+		}
+	}
 
 	SetTimer(1, m_nRateInterval, NULL);
 	SetTimer(2, m_nInterval, NULL);
@@ -308,9 +404,9 @@ void TransForm::SendChannelData(const char* data, size_t len)
 
 	NetUdpClientSend(pDataBuff, len + 2);
 
-	for (int i = 0; i < len + 2; ++i)
+	for (int i = 0; i < (len + 2); ++i)
 	{
-		Log::Info("Udp Send: %X", pDataBuff[i]);
+		Log::Info("Udp Send: %02X", pDataBuff[i]);
 	}
 	delete[] pDataBuff;
 }
@@ -510,11 +606,41 @@ void TransForm::OnSysCommand(UINT nID, LPARAM lParam)
 {
 	if ((nID & 0xFFFFFF) == SC_CLOSE)
 	{
+		int devIndex = m_combox.GetCurSel();
+		CString index;
+		index.Format(_T("%d"), devIndex);
+		WritePrivateProfileString(L"App", L"devIndex", index, m_fileDir);
+
+		int mode = 1;
+		if (((CButton*)GetDlgItem(IDC_RADIO2))->GetCheck())
+		{
+			mode = 2;
+		}
+		CString strMode;
+		strMode.Format(_T("%d"), mode);
+		WritePrivateProfileString(L"App", L"mode", strMode, m_fileDir);
+
+		CString channelIni = L"";
+		map<int, api_udp_data_t>::reverse_iterator iter;
+		for (iter = m_apiDataMap.rbegin(); iter != m_apiDataMap.rend(); iter++) {
+			CString chNo = stringToLPCWSTR((char*)iter->second.szChannelNo);
+			chNo += L';';
+			channelIni += chNo;
+		}
+
+		if (!channelIni.IsEmpty())
+		{
+			channelIni.Delete(channelIni.GetLength() - 1, 1);
+		}
+		WritePrivateProfileString(L"App", L"channel", channelIni, m_fileDir);
+
+
 		KillTimer(1);
 		KillTimer(2);
 
 		m_apiDataMap.clear();
 		m_channelVec.clear();
+		NetUdpClientUninit();
 		Log::Info("MainThread exit.");
 
 		this->DestroyWindow();
@@ -554,6 +680,9 @@ void TransForm::OnBnClickedButton1()
 		timeInterval = "1000";
 		m_timeEdit.SetWindowTextW(timeInterval);
 	}
+
+	WritePrivateProfileString(L"App", L"updateRate", rateInterval, m_fileDir);
+	WritePrivateProfileString(L"App", L"sendRate", timeInterval, m_fileDir);
 
 	m_nRateInterval = _ttoi(rateInterval);
 	SetTimer(1, m_nRateInterval, NULL);
